@@ -2,6 +2,8 @@
 import os
 import subprocess
 import sys
+import time
+import pytest
 
 def test_uvicorn_exists():
     """Stellt sicher, dass uvicorn in der venv installiert ist."""
@@ -43,3 +45,20 @@ def test_service_file_syntax():
         )
         # systemd-analyze gibt bei Erfolg keinen Fehler, exit code 0
         assert result.returncode == 0, f"Service-Syntaxfehler: {result.stderr}"
+
+
+def test_port_8000_is_bound_only_once():
+    """Prüft, dass Port 8000 genau einmal gebunden ist (von systemd ODER manuellem Prozess)."""
+    if sys.platform != "linux":
+        return  # Dieser Test ist nur auf dem Pi relevant
+    # Mit ss (socket statistics) prüfen, wie viele Prozesse auf Port 8000 lauschen
+    result = subprocess.run(
+        ["ss", "-tlnp", "sport", "= :8000"], capture_output=True, text=True
+    )
+    # Zähle die Zeilen mit LISTEN
+    lines = [line for line in result.stdout.splitlines() if "LISTEN" in line]
+    assert len(lines) <= 1, (
+        f"Port 8000 wird von {len(lines)} Prozessen belegt. "
+        "Möglicherweise läuft der Server doppelt (systemd + manuell). "
+        f"Laufende Prozesse:\n{result.stdout}"
+    )
