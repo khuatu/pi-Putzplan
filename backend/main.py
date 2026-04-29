@@ -180,6 +180,21 @@ async def complete_task(hid: str, payload: dict, user: str = Depends(get_current
 # --- WebSocket für Echtzeit (mit Auth) ---
 connected_clients = {}
 
+@app.delete("/households/{hid}/members/{username}")
+async def remove_member(hid: str, username: str, user: str = Depends(get_current_user)):
+    household = await households_col.find_one({"_id": ObjectId(hid)})
+    if not household:
+        raise HTTPException(404, "Haushalt nicht gefunden")
+    if username not in household["members"]:
+        raise HTTPException(400, "Mitglied nicht gefunden")
+    # Entfernen
+    household["members"].remove(username)
+    await households_col.update_one(
+        {"_id": household["_id"]},
+        {"$set": {"members": household["members"]}}
+    )
+    return {"message": f"Mitglied {username} entfernt"}
+
 @app.websocket("/ws/{household_id}")
 async def websocket_endpoint(ws: WebSocket, household_id: str, token: str = None):
     if not token:
