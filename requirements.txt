@@ -1,0 +1,9 @@
+# backend/requirements.txt
+fastapi>=0.115.12
+uvicorn[standard]>=0.34.2
+motor>=3.7.1
+pydantic>=2.11.4
+python-jose[cryptography]>=3.4.0
+passlib[bcrypt]>=1.7.4
+python-telegram-bot[job-queue]>=21.11
+httpx>=0.28.1

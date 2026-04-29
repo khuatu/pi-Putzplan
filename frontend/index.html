@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#4CAF50">
+    <title>Putzplan WG</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: auto; padding: 1em; }
+        #loginArea, #mainApp { margin-top: 1em; }
+    </style>
+</head>
+<body>
+    <h1>Putzplan WG</h1>
+    <div id="loginArea">
+        <input type="text" id="usernameInput" placeholder="Benutzername">
+        <input type="password" id="passwordInput" placeholder="Passwort">
+        <button onclick="login()">Einloggen / Registrieren</button>
+    </div>
+    <div id="mainApp" style="display:none">
+        <button onclick="createHousehold()">Neuen Haushalt erstellen</button>
+        <p>Haushalt-ID: <span id="householdId"></span></p>
+        <button onclick="connectWs()">WebSocket verbinden</button>
+        <div id="assignments"></div>
+    </div>
+    <script>
+        let token = localStorage.getItem('token');
+        let currentHouseholdId = null;
+        let ws = null;
+
+        async function apiCall(url, method='GET', body=null) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            const resp = await fetch(url, {
+                method, headers,
+                body: body ? JSON.stringify(body) : null
+            });
+            if (resp.status === 401) {
+                alert('Bitte einloggen');
+                localStorage.removeItem('token');
+                location.reload();
+            }
+            return resp;
+        }
+
+        async function login() {
+            const user = document.getElementById('usernameInput').value;
+            const pass = document.getElementById('passwordInput').value;
+            let resp = await fetch('/token', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username: user, password: pass})
+            });
+            if (!resp.ok) {
+                // Registrieren versuchen
+                resp = await fetch('/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: user, password: pass})
+                });
+                if (!resp.ok) {
+                    alert('Fehler bei Anmeldung/Registrierung');
+                    return;
+                }
+                // Nach Registrierung gleich einloggen
+                resp = await fetch('/token', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: user, password: pass})
+                });
+            }
+            const data = await resp.json();
+            token = data.access_token;
+            localStorage.setItem('token', token);
+            document.getElementById('loginArea').style.display = 'none';
+            document.getElementById('mainApp').style.display = 'block';
+        }
+
+        async function createHousehold() {
+            const resp = await apiCall('/households', 'POST', {
+                name: "WG Berlin",
+                members: ["Anna", "Paul"],
+                cleaning_plans: [
+                    { id: "bad", name: "Bad", tasks: [
+                        {name: "Waschbecken", interval_weeks: 1},
+                        {name: "Boden wischen", interval_weeks: 2}
+                    ]}
+                ]
+            });
+            if (resp.ok) {
+                const h = await resp.json();
+                currentHouseholdId = h._id;
+                document.getElementById('householdId').innerText = h._id;
+                showAssignments(h);
+            }
+        }
+
+        function connectWs() {
+            if (!currentHouseholdId) return;
+            if (ws) ws.close();
+            ws = new WebSocket(`ws://${location.host}/ws/${currentHouseholdId}?token=${token}`);
+            ws.onmessage = e => showAssignments(JSON.parse(e.data));
+        }
+
+        function showAssignments(household) {
+            const div = document.getElementById('assignments');
+            div.innerHTML = '';
+            const a = household.current_week?.assignments || {};
+            for (let [user, tasks] of Object.entries(a)) {
+                div.innerHTML += `<p><b>${user}</b>: ${tasks.join(', ')}</p>`;
+            }
+        }
+
+        if (token) {
+            document.getElementById('loginArea').style.display = 'none';
+            document.getElementById('mainApp').style.display = 'block';
+        }
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js');
+        }
+    </script>
+</body>
+</html>

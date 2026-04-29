@@ -1,0 +1,227 @@
+import asyncio
+from datetime import datetime, timedelta
+import os
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from bson import ObjectId
+from backend.database import database, households_col, history_col, users_col
+from backend.models import HouseholdCreate, VetoRequest
+from backend.assignment import assign_plans
+from backend.auth import (
+    hash_password, verify_password, create_access_token, get_current_user,
+    oauth2_scheme, SECRET_KEY, ALGORITHM
+)
+import jwt
+from backend.telegram_bot import run_telegram_bot
+
+app = FastAPI()
+
+# Statische Dateien ausliefern
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+@app.get("/")
+async def index():
+    return FileResponse("frontend/index.html")
+
+# ------------- Authentifizierung -------------
+@app.post("/register")
+async def register(payload: dict):
+    username = payload.get("username")
+    password = payload.get("password")
+    if not username or not password:
+        raise HTTPException(400, "Username und Passwort erforderlich")
+    if await users_col.find_one({"username": username}):
+        raise HTTPException(400, "Benutzer existiert bereits")
+    hashed = hash_password(password)
+    await users_col.insert_one({"username": username, "hashed_password": hashed, "telegram_chat_id": None})
+    return {"message": "Registrierung erfolgreich"}
+
+@app.post("/token")
+async def login(payload: dict):
+    username = payload.get("username")
+    password = payload.get("password")
+    user = await users_col.find_one({"username": username})
+    if not user or not verify_password(password, user["hashed_password"]):
+        raise HTTPException(401, "Anmeldedaten ungültig")
+    token = create_access_token(data={"sub": username})
+    return {"access_token": token, "token_type": "bearer"}
+
+# ------------- Geschützte Routen -------------
+
+@app.post("/households", status_code=201)
+async def create_household(data: HouseholdCreate, user: str = Depends(get_current_user)):
+    # Erstellenden Benutzer automatisch als Mitglied hinzufügen, falls nicht vorhanden
+    if user not in data.members:
+        data.members.append(user)
+    doc = {
+        "name": data.name,
+        "members": data.members,
+        "cleaning_plans": [plan.dict() for plan in data.cleaning_plans],
+        "current_week": {
+            "week_start": datetime.utcnow().strftime("%Y-%m-%d"),
+            "deadline": (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59"),
+            "assignments": {}
+        },
+        "veto_requests": []
+    }
+    result = await households_col.insert_one(doc)
+    household = await households_col.find_one({"_id": result.inserted_id})
+    # Erste Zuteilung
+    assignments = await assign_plans(household)
+    await households_col.update_one(
+        {"_id": household["_id"]},
+        {"$set": {"current_week.assignments": assignments}}
+    )
+    household["_id"] = str(household["_id"])
+    return household
+
+@app.get("/households/{hid}")
+async def get_household(hid: str, user: str = Depends(get_current_user)):
+    try:
+        oid = ObjectId(hid)
+    except:
+        raise HTTPException(400, "Ungültige ID")
+    household = await households_col.find_one({"_id": oid})
+    if not household:
+        raise HTTPException(404)
+    household["_id"] = str(household["_id"])
+    return household
+
+@app.post("/households/{hid}/assign")
+async def create_assignment(hid: str, user: str = Depends(get_current_user)):
+    household = await households_col.find_one({"_id": ObjectId(hid)})
+    if not household:
+        raise HTTPException(404)
+    assignments = await assign_plans(household)
+    await households_col.update_one(
+        {"_id": household["_id"]},
+        {"$set": {
+            "current_week.assignments": assignments,
+            "current_week.week_start": datetime.utcnow().strftime("%Y-%m-%d"),
+            "current_week.deadline": (datetime.utcnow() + timedelta(days=7)).isoformat()
+        }}
+    )
+    return {"message": "Neue Zuteilung erstellt"}
+
+@app.post("/households/{hid}/veto")
+async def request_veto(hid: str, veto: VetoRequest, user: str = Depends(get_current_user)):
+    household = await households_col.find_one({"_id": ObjectId(hid)})
+    if not household:
+        raise HTTPException(404)
+    if veto.by_user not in household["members"]:
+        raise HTTPException(400, "Nutzer nicht im Haushalt")
+    # Prüfen, ob nicht schon ein Veto dieses Nutzers offen ist
+    for v in household.get("veto_requests", []):
+        if v["by_user"] == veto.by_user:
+            raise HTTPException(400, "Veto bereits aktiv")
+    household["veto_requests"].append(veto.dict())
+    await households_col.update_one(
+        {"_id": household["_id"]},
+        {"$set": {"veto_requests": household["veto_requests"]}}
+    )
+    return {"message": "Veto eingereicht"}
+
+@app.post("/households/{hid}/veto/accept")
+async def accept_veto(hid: str, payload: dict, user: str = Depends(get_current_user)):
+    voter = payload.get("user", user)  # der Zustimmende
+    household = await households_col.find_one({"_id": ObjectId(hid)})
+    if not household:
+        raise HTTPException(404)
+    modified = False
+    for v in household.get("veto_requests", []):
+        if voter not in v["accepted_by"] and voter != v["by_user"]:
+            v["accepted_by"].append(voter)
+            modified = True
+            other_members = [m for m in household["members"] if m != v["by_user"]]
+            if all(m in v["accepted_by"] for m in other_members):
+                # Alle haben zugestimmt -> neu zuteilen und Veto löschen
+                assignments = await assign_plans(household)
+                await households_col.update_one(
+                    {"_id": household["_id"]},
+                    {"$set": {"current_week.assignments": assignments, "veto_requests": []}}
+                )
+                return {"message": "Veto angenommen, neu verteilt"}
+    if modified:
+        await households_col.update_one(
+            {"_id": household["_id"]},
+            {"$set": {"veto_requests": household["veto_requests"]}}
+        )
+        return {"message": "Zustimmung registriert"}
+    raise HTTPException(400, "Keine Aktion möglich")
+
+@app.post("/households/{hid}/complete")
+async def complete_task(hid: str, payload: dict, user: str = Depends(get_current_user)):
+    task_id = payload.get("task_id")
+    username = payload.get("user")  # Wer die Aufgabe erledigt, kann auch der eingeloggte User sein
+    household = await households_col.find_one({"_id": ObjectId(hid)})
+    if not household:
+        raise HTTPException(404)
+    # Prüfen, ob task_id dem user zugewiesen ist
+    assignments = household.get("current_week", {}).get("assignments", {})
+    if task_id not in assignments.get(username, []):
+        raise HTTPException(400, "Aufgabe nicht zugewiesen")
+    await history_col.insert_one({
+        "household_id": household["_id"],
+        "week_start": household["current_week"]["week_start"],
+        "user": username,
+        "task_id": task_id,
+        "completed": True
+    })
+    return {"message": "Aufgabe erledigt"}
+
+# ------------- WebSocket (Echtzeit) -------------
+connected_clients = {}
+
+@app.websocket("/ws/{household_id}")
+async def ws_endpoint(websocket: WebSocket, household_id: str, token: str = None):
+    # Token validieren
+    if not token:
+        await websocket.close(code=1008)
+        return
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+    except jwt.PyJWTError:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    if household_id not in connected_clients:
+        connected_clients[household_id] = []
+    connected_clients[household_id].append(websocket)
+
+    # Aktuellen Haushalt senden
+    try:
+        household = await households_col.find_one({"_id": ObjectId(household_id)})
+        if household:
+            household["_id"] = str(household["_id"])
+            await websocket.send_json(household)
+    except:
+        pass
+
+    # Change Stream auf dieses Dokument
+    pipeline = [{"$match": {"documentKey._id": ObjectId(household_id)}}]
+    try:
+        async with households_col.watch(pipeline, full_document="updateLookup") as stream:
+            while True:
+                change = await stream.try_next()
+                if change and "fullDocument" in change:
+                    doc = change["fullDocument"]
+                    doc["_id"] = str(doc["_id"])
+                    for client in connected_clients.get(household_id, []):
+                        try:
+                            await client.send_json(doc)
+                        except:
+                            pass
+                await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        connected_clients[household_id].remove(websocket)
+
+# ------------- Startup-Event: Telegram-Bot etc. -------------
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(run_telegram_bot())
+    # Reminder-Logik könnte man später einbauen

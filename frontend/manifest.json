@@ -1,0 +1,9 @@
+{
+  "name": "Putzplan WG",
+  "short_name": "Putzplan",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4CAF50",
+  "icons": []
+}
