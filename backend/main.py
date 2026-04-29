@@ -95,8 +95,47 @@ async def get_household(hid: str, user: str = Depends(get_current_user)):
     household = await households_col.find_one({"_id": oid})
     if not household:
         raise HTTPException(404)
+    # Nur Mitglieder dürfen den Haushalt sehen
+    if user not in household["members"]:
+        raise HTTPException(403, "Du bist kein Mitglied dieses Haushalts")
     household["_id"] = str(household["_id"])
     return household
+
+@app.post("/households/{hid}/members")
+async def add_member(hid: str, payload: dict, user: str = Depends(get_current_user)):
+    username = payload.get("username")
+    if not username:
+        raise HTTPException(400, "Username erforderlich")
+    household = await households_col.find_one({"_id": ObjectId(hid)})
+    if not household:
+        raise HTTPException(404)
+    if user not in household["members"]:
+        raise HTTPException(403, "Nur Mitglieder können andere hinzufügen")
+    if username in household["members"]:
+        raise HTTPException(400, "Bereits Mitglied")
+    household["members"].append(username)
+    await households_col.update_one(
+        {"_id": household["_id"]},
+        {"$set": {"members": household["members"]}}
+    )
+    return {"message": f"{username} hinzugefügt"}
+
+@app.put("/households/{hid}/plans")
+async def update_cleaning_plans(hid: str, payload: dict, user: str = Depends(get_current_user)):
+    household = await households_col.find_one({"_id": ObjectId(hid)})
+    if not household:
+        raise HTTPException(404)
+    if user not in household["members"]:
+        raise HTTPException(403)
+    new_plans = payload.get("cleaning_plans", [])
+    # Validierung könnte hier erfolgen, wir übernehmen sie einfach
+    await households_col.update_one(
+        {"_id": household["_id"]},
+        {"$set": {"cleaning_plans": new_plans}}
+    )
+    # Optional: sofort neue Zuteilung berechnen? Oder manuell anstoßen lassen.
+    # Hier aktualisieren wir nur die Pläne.
+    return {"message": "Pläne aktualisiert"}
 
 @app.post("/households/{hid}/assign")
 async def create_assignment(hid: str, user: str = Depends(get_current_user)):
