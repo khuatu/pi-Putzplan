@@ -1,4 +1,7 @@
 import asyncio
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.staticfiles import StaticFiles
@@ -27,8 +30,45 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
-)
+scheduler = AsyncIOScheduler()
+async def weekly_assignment_job():
+    """
+    Diese Funktion wird jede Woche zur konfigurierten Zeit ausgeführt
+    und berechnet für jeden Haushalt eine neue Zuteilung.
+    """
+    async for household in households_col.find({}):
+        try:
+            assignments = await assign_plans(household)
+            await households_col.update_one(
+                {"_id": household["_id"]},
+                {"$set": {
+                    "current_week.assignments": assignments,
+                    "current_week.week_start": datetime.utcnow().strftime("%Y-%m-%d"),
+                    "current_week.deadline": (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59"),
+                    "veto_requests": []
+                }}
+            )
+            print(f"Neue Zuteilung für Haushalt {household['_id']} berechnet.")
+        except Exception as e:
+            print(f"Fehler bei Zuteilung für {household['_id']}: {e}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    asyncio.create_task(run_telegram_bot())
+    scheduler.add_job(
+        weekly_assignment_job,
+        CronTrigger(day_of_week='mon', hour=2, minute=0),  # Jeden Montag um 02:00 Uhr
+        id='weekly_assignment'
+    )
+    scheduler.start()
+    print("Scheduler gestartet. Neue Zuteilung jeden Montag um 02:00 Uhr.")
+    yield
+    # Shutdown
+    scheduler.shutdown()
+
+
+app = FastAPI(lifespan=lifespan)
 
 # Statische Dateien (Frontend) ausliefern
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
