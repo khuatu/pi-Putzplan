@@ -15,8 +15,9 @@ def test_create_and_verify_token():
 
 @pytest.mark.asyncio
 async def test_get_current_user_invalid_token():
-    with pytest.raises((HTTPException, JWTError)):
+    with pytest.raises(Exception) as exc_info:
         await get_current_user("ungueltig")
+    assert exc_info.type in (HTTPException, JWTError)
 
 def test_hash_and_verify_short_password():
     password = "test"
