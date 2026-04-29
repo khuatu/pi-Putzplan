@@ -14,3 +14,10 @@ async def test_register_and_login():
         if resp.status_code == 200:
             data = resp.json()
             assert "access_token" in data
+
+@pytest.mark.asyncio
+async def test_root_endpoint():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/")
+        assert resp.status_code == 200
