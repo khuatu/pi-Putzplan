@@ -1,11 +1,17 @@
-# tests/test_email.py
+import os
 import pytest
 from unittest.mock import patch
-from backend.email_utils import send_email
+
+def test_sendgrid_api_key_is_set():
+    key = os.getenv("SENDGRID_API_KEY")
+    if key is None:
+        pytest.skip("SENDGRID_API_KEY nicht gesetzt – kein E‑Mail‑Versand möglich, aber in Ordnung.")
+    # Wenn gesetzt, muss er das richtige Format haben (beginnt mit SG.)
+    assert key.startswith("SG."), "API‑Key hat nicht das erwartete Format"
 
 def test_send_email_with_mock():
     with patch("backend.email_utils.SendGridAPIClient") as mock_sg:
-        # Setze voraus, dass API-Key gesetzt ist (sonst return)
-        with patch.dict("os.environ", {"SENDGRID_API_KEY": "dummy"}):
+        with patch.dict("os.environ", {"SENDGRID_API_KEY": "SG.dummy_key"}):
+            from backend.email_utils import send_email
             send_email("test@example.com", "Test", "Hallo Welt")
             mock_sg.assert_called_once()
