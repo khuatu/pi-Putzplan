@@ -13,8 +13,22 @@ from backend.auth import (
     SECRET_KEY, ALGORITHM
 )
 from backend.telegram_bot import run_telegram_bot
+import logging
 
-app = FastAPI()
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("putzplan.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+)
 
 # Statische Dateien (Frontend) ausliefern
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
