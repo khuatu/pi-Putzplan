@@ -74,6 +74,14 @@
             <button id="deleteMemberBtn" class="danger hidden" onclick="deleteSelectedMember()">Ausgewähltes entfernen</button>
         </div>
 
+        <!-- Einladungsbereich -->
+        <div id="inviteArea" class="card">
+            <h3>Einladung</h3>
+            <p>Dein Einladungscode: <strong id="inviteCodeDisplay">wird geladen...</strong></p>
+            <input type="text" id="inviteInput" placeholder="Einladungscode eines anderen Haushalts">
+            <button onclick="joinByInviteCode()">Beitreten</button>
+        </div>
+
         <!-- Räume & Aufgaben bearbeiten -->
         <div id="plansCard" class="card hidden">
             <h3>Räume & Aufgaben bearbeiten</h3>
