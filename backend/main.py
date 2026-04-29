@@ -325,6 +325,34 @@ async def websocket_endpoint(ws: WebSocket, household_id: str, token: str = None
     finally:
         connected_clients[household_id].remove(ws)
 
+@app.get("/invite/{code}")
+async def get_invite_info(code: str):
+    """Liefert Namen des Haushalts und aktuelle Mitglieder zu einem Einladungscode."""
+    household = await households_col.find_one({"invite_code": code})
+    if not household:
+        raise HTTPException(404, "Einladungscode ungültig")
+    return {
+        "household_id": str(household["_id"]),
+        "name": household["name"],
+        "members": household["members"]
+    }
+
+@app.post("/invite/{code}/join")
+async def join_household_by_code(code: str, user: str = Depends(get_current_user)):
+    """Fügt den eingeloggten Benutzer dem Haushalt hinzu."""
+    household = await households_col.find_one({"invite_code": code})
+    if not household:
+        raise HTTPException(404, "Einladungscode ungültig")
+    if user in household["members"]:
+        raise HTTPException(400, "Du bist bereits Mitglied")
+    household["members"].append(user)
+    await households_col.update_one(
+        {"_id": household["_id"]},
+        {"$set": {"members": household["members"]}}
+    )
+    household["_id"] = str(household["_id"])
+    return household  # direkt den gesamten Haushalt zurückgeben, damit der Client ihn laden kann
+
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(run_telegram_bot())
