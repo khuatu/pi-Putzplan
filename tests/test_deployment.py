@@ -62,3 +62,17 @@ def test_port_8000_is_bound_only_once():
         "Möglicherweise läuft der Server doppelt (systemd + manuell). "
         f"Laufende Prozesse:\n{result.stdout}"
     )
+
+
+def test_port_8000_not_bound():
+    """Nur auf dem Pi: Port 8000 darf nicht bereits von einem anderen Prozess belegt sein."""
+    if sys.platform != "linux":
+        return
+    result = subprocess.run(
+        ["sudo", "ss", "-tlnp", "sport", "= :8000"],
+        capture_output=True, text=True
+    )
+    lines = [line for line in result.stdout.splitlines() if "LISTEN" in line]
+    assert len(lines) == 0, (
+        f"Port 8000 ist bereits belegt – bitte beende den Prozess:\n{result.stdout}"
+    )
