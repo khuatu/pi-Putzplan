@@ -17,6 +17,7 @@ from backend.auth import (
 )
 from backend.telegram_bot import run_telegram_bot
 import logging
+import secrets
 
 
 
@@ -105,10 +106,16 @@ async def login(payload: dict):
 async def create_household(data: HouseholdCreate, user: str = Depends(get_current_user)):
     if user not in data.members:
         data.members.append(user)
+    # Einladungscode generieren (solange wiederholen, bis er einmalig ist)
+    while True:
+        code = f"{secrets.token_hex(3)}-{secrets.randbelow(1000)}"  # z.B. "a1b2c3-456"
+        if not await households_col.find_one({"invite_code": code}):
+            break
     doc = {
         "name": data.name,
         "members": data.members,
         "cleaning_plans": [plan.dict() for plan in data.cleaning_plans],
+        "invite_code": code,
         "current_week": {
             "week_start": datetime.utcnow().strftime("%Y-%m-%d"),
             "deadline": (datetime.utcnow() + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59"),
