@@ -1,3 +1,4 @@
+# tests/test_assignment.py
 import pytest
 from backend.assignment import assign_plans
 from unittest.mock import AsyncMock, patch
@@ -31,7 +32,7 @@ def sample_household():
 @pytest.mark.asyncio
 async def test_assign_plans_basic(sample_household):
     # Mock die history_col.aggregate, um leere Historie zu simulieren
-    with patch('backend.assignment.history_col') as mock_col:
+    with patch("backend.assignment.history_col") as mock_col:
         mock_agg = AsyncMock()
         mock_agg.to_list.return_value = []
         mock_col.aggregate.return_value = mock_agg
@@ -41,5 +42,4 @@ async def test_assign_plans_basic(sample_household):
         assert len(assignments["Paul"]) > 0
         # Zusammen sollen alle aktiven Aufgaben abgedeckt sein
         all_tasks = assignments["Anna"] + assignments["Paul"]
-        # Erwarte: bad|0 (Waschbecken), kueche|0 (Herd) und evtl. Boden-Aufgaben, falls aktiv
         assert "bad|0" in all_tasks or "kueche|0" in all_tasks
