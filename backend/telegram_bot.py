@@ -19,14 +19,14 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {"username": username},
         {"$set": {"telegram_chat_id": chat_id}}
     )
-    if result.modified_count > 0:
+    if result.modified_count:
         await update.message.reply_text(f"Chat-ID für {username} gespeichert.")
     else:
-        await update.message.reply_text("Benutzer nicht gefunden oder bereits registriert.")
+        await update.message.reply_text("Benutzer nicht gefunden.")
 
 async def run_telegram_bot():
     if not TELEGRAM_TOKEN:
-        print("TELEGRAM_TOKEN nicht gesetzt. Bot wird nicht gestartet.")
+        print("Telegram-Token fehlt. Bot wird nicht gestartet.")
         return
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
@@ -34,6 +34,5 @@ async def run_telegram_bot():
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-    # Halte den Bot am Leben
     while True:
         await asyncio.sleep(3600)

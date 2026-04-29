@@ -1,4 +1,3 @@
-# backend/auth.py
 import os
 from datetime import datetime, timedelta
 from passlib.hash import bcrypt as pwd_bcrypt
@@ -7,7 +6,6 @@ from fastapi import HTTPException, status, Depends
 from fastapi.security import OAuth2PasswordBearer
 from backend.database import users_col
 
-# Geheimnisse sollten aus Umgebungsvariablen kommen
 SECRET_KEY = os.getenv("SECRET_KEY", "bitte_aendern_geheim")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 Stunden

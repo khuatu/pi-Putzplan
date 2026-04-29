@@ -3,11 +3,11 @@ from typing import List, Dict, Optional
 
 class Task(BaseModel):
     name: str
-    interval_weeks: int = 1      # 1 = wöchentlich, 2 = alle zwei Wochen
+    interval_weeks: int = 1   # 1 = jede Woche, 2 = alle zwei Wochen
 
 class CleaningPlan(BaseModel):
-    id: str
-    name: str
+    id: str          # z.B. "bad"
+    name: str        # z.B. "Bad"
     tasks: List[Task]
 
 class HouseholdCreate(BaseModel):
