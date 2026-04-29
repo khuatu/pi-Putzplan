@@ -160,6 +160,7 @@ async def create_household(data: HouseholdCreate, user: str = Depends(get_curren
         "name": data.name,
         "members": data.members,
         "cleaning_plans": [plan.dict() for plan in data.cleaning_plans],
+         "created_by": user,   #der eingeloggte Benutzer, der den Haushalt erstellt
         "invite_code": code,
         "current_week": {
             "week_start": datetime.utcnow().strftime("%Y-%m-%d"),
@@ -408,6 +409,21 @@ async def update_my_email(payload: dict, user: str = Depends(get_current_user)):
         {"$set": {"email": email}}
     )
     return {"message": "E-Mail‑Adresse gespeichert"}
+
+@app.delete("/households/{hid}")
+async def delete_household(hid: str, user: str = Depends(get_current_user)):
+    try:
+        oid = ObjectId(hid)
+    except:
+        raise HTTPException(400, "Ungültige ID")
+    household = await households_col.find_one({"_id": oid})
+    if not household:
+        raise HTTPException(404, "Haushalt nicht gefunden")
+    # Nur der Ersteller darf löschen
+    if household.get("created_by") != user:
+        raise HTTPException(403, "Nur der Ersteller des Haushalts darf ihn löschen")
+    await households_col.delete_one({"_id": oid})
+    return {"message": "Haushalt gelöscht"}
 
 @app.on_event("startup")
 async def startup():

@@ -42,6 +42,7 @@
             <button onclick="showCreateForm()">Neuen Haushalt erstellen</button>
             <button onclick="showLoadForm()">Haushalt laden</button>
             <button onclick="assignNewWeek()" id="assignBtn" disabled>Neue Zuteilung jetzt</button>
+            <button onclick="deleteCurrentHousehold()" id="deleteHouseholdBtn" class="danger" style="display:none;">Haushalt löschen</button>
         </div>
 
         <!-- Formular: Neuen Haushalt anlegen -->
@@ -257,6 +258,16 @@
             localStorage.setItem('currentHouseholdId', h._id);
             document.getElementById('assignBtn').disabled = false;
             document.getElementById('inviteCodeDisplay').innerText = h.invite_code || 'nicht verfügbar';
+
+            // Lösch‑Button anzeigen, wenn der aktuelle Benutzer der Ersteller ist
+            const currentUser = document.getElementById('usernameInput').value.trim();
+            const deleteBtn = document.getElementById('deleteHouseholdBtn');
+            if (h.created_by === currentUser) {
+                deleteBtn.style.display = 'inline-block';
+            } else {
+                deleteBtn.style.display = 'none';
+            }
+
             show('membersCard');
             show('assignmentsCard');
             show('plansCard');
@@ -348,6 +359,21 @@
                 document.getElementById('deleteMemberBtn').classList.add('hidden');
             } else {
                 alert('Fehler beim Entfernen');
+            }
+        }
+
+        //Haushalt löschen//
+        async function deleteCurrentHousehold() {
+            if (!currentHouseholdId) return;
+            if (!confirm('Möchtest du diesen Haushalt wirklich endgültig löschen? Alle Daten (Mitglieder, Putzpläne, Historie) gehen verloren.')) return;
+            const resp = await apiCall(`/households/${currentHouseholdId}`, 'DELETE');
+            if (resp.ok) {
+                alert('Haushalt gelöscht');
+                localStorage.removeItem('currentHouseholdId');
+                location.reload();  // zurück zur Startseite ohne Haushalt
+            } else {
+                const data = await resp.json();
+                alert(data.detail || 'Fehler beim Löschen');
             }
         }
 

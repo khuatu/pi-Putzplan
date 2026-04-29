@@ -88,3 +88,34 @@ async def test_add_member_and_access_control():
         # jetzt darf friend zugreifen
         get_resp = await ac.get(f"/households/{hid}", headers={"Authorization": f"Bearer {friend_token}"})
         assert get_resp.status_code == 200
+
+@pytest.mark.asyncio
+async def test_delete_household():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # Zwei Benutzer registrieren
+        await ac.post("/register", json={"username": "owner", "password": "test"})
+        await ac.post("/register", json={"username": "intruder", "password": "test"})
+        # owner einloggen
+        resp = await ac.post("/token", json={"username": "owner", "password": "test"})
+        owner_token = resp.json()["access_token"]
+        headers_owner = {"Authorization": f"Bearer {owner_token}"}
+        # Haushalt erstellen
+        create_resp = await ac.post("/households", json={
+            "name": "Zu löschen",
+            "members": ["owner"],
+            "cleaning_plans": []
+        }, headers=headers_owner)
+        assert create_resp.status_code == 201
+        hid = create_resp.json()["_id"]
+        # intruder kann nicht löschen (403)
+        resp = await ac.post("/token", json={"username": "intruder", "password": "test"})
+        intruder_token = resp.json()["access_token"]
+        del_resp = await ac.delete(f"/households/{hid}", headers={"Authorization": f"Bearer {intruder_token}"})
+        assert del_resp.status_code == 403
+        # owner kann löschen
+        del_resp = await ac.delete(f"/households/{hid}", headers=headers_owner)
+        assert del_resp.status_code == 200
+        # Haushalt sollte jetzt nicht mehr existieren
+        get_resp = await ac.get(f"/households/{hid}", headers=headers_owner)
+        assert get_resp.status_code == 404
