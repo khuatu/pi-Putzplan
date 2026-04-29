@@ -199,6 +199,10 @@ async def add_member(hid: str, payload: dict, user: str = Depends(get_current_us
     username = payload.get("username")
     if not username:
         raise HTTPException(400, "Username erforderlich")
+    # Prüfen, ob Benutzer existiert
+    user_doc = await users_col.find_one({"username": username})
+    if not user_doc:
+        raise HTTPException(400, "Dieser Benutzer existiert nicht")
     household = await households_col.find_one({"_id": ObjectId(hid)})
     if not household:
         raise HTTPException(404)

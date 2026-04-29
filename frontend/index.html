@@ -339,12 +339,19 @@
             const nameInput = document.getElementById('newMemberName');
             const name = nameInput.value.trim();
             if (!name) return;
+            // Prüfen, ob schon in der Liste
+            if (householdData.members.includes(name)) {
+                alert('Dieser Benutzer ist bereits Mitglied.');
+                return;
+            }
+            // Prüfen, ob Benutzername dem aktuellen Benutzer entspricht? Nicht nötig.
             const resp = await apiCall(`/households/${currentHouseholdId}/members`, 'POST', { username: name });
             if (resp.ok) {
                 nameInput.value = '';
                 await loadHouseholdById(currentHouseholdId);
             } else {
-                alert('Fehler beim Hinzufügen');
+                const data = await resp.json();
+                alert(data.detail || 'Fehler beim Hinzufügen');
             }
         }
 
