@@ -65,6 +65,14 @@
             <button onclick="loadHousehold()">Laden</button>
         </div>
 
+        <!-- Einladungsbereich -->
+        <div id="inviteArea" class="card">
+            <h3>Einladung</h3>
+            <p>Dein Einladungscode: <strong id="inviteCodeDisplay">wird geladen...</strong></p>
+            <input type="text" id="inviteInput" placeholder="Einladungscode eines anderen Haushalts">
+            <button onclick="joinByInviteCode()">Beitreten</button>
+        </div>
+
         <!-- Mitglieder & Verwaltung -->
         <div id="membersCard" class="card hidden">
             <h3>Mitglieder</h3>
@@ -73,13 +81,10 @@
             <button onclick="addMember()">Hinzufügen</button>
             <button id="deleteMemberBtn" class="danger hidden" onclick="deleteSelectedMember()">Ausgewähltes entfernen</button>
         </div>
-
-        <!-- Einladungsbereich -->
-        <div id="inviteArea" class="card">
-            <h3>Einladung</h3>
-            <p>Dein Einladungscode: <strong id="inviteCodeDisplay">wird geladen...</strong></p>
-            <input type="text" id="inviteInput" placeholder="Einladungscode eines anderen Haushalts">
-            <button onclick="joinByInviteCode()">Beitreten</button>
+        <div class="card">
+            <h3>Meine E‑Mail</h3>
+            <input type="email" id="emailInput" placeholder="deine@email.de">
+            <button onclick="saveEmail()">Speichern</button>
         </div>
 
         <!-- Räume & Aufgaben bearbeiten -->
@@ -90,6 +95,7 @@
             <br><br>
             <button onclick="savePlans()">Speichern</button>
         </div>
+
 
         <!-- Zuteilungen -->
         <div id="assignmentsCard" class="card hidden">
@@ -250,6 +256,7 @@
             document.getElementById('currentHouseholdId').innerText = h._id;
             localStorage.setItem('currentHouseholdId', h._id);
             document.getElementById('assignBtn').disabled = false;
+            document.getElementById('inviteCodeDisplay').innerText = h.invite_code || 'nicht verfügbar';
             show('membersCard');
             show('assignmentsCard');
             show('plansCard');
@@ -272,6 +279,29 @@
                 renderVetos();
             };
             ws.onclose = () => console.log('WebSocket geschlossen');
+        }
+
+        // ---------- Einladungscode beitreten ----------
+        async function joinByInviteCode() {
+            const code = document.getElementById('inviteInput').value.trim();
+            if (!code) return;
+            // Zuerst Infos holen
+            let resp = await fetch(`/invite/${code}`);
+            if (!resp.ok) {
+                alert('Einladungscode nicht gefunden');
+                return;
+            }
+            const info = await resp.json();
+            if (confirm(`Möchtest du dem Haushalt "${info.name}" (Mitglieder: ${info.members.join(', ')}) beitreten?`)) {
+                resp = await apiCall(`/invite/${code}/join`, 'POST');
+                if (resp.ok) {
+                    const h = await resp.json();
+                    setHousehold(h);
+                    alert('Du bist beigetreten!');
+                } else {
+                    alert('Beitritt fehlgeschlagen (vielleicht schon Mitglied?)');
+                }
+            }
         }
 
         // ---------- Mitglieder anzeigen & verwalten ----------
@@ -301,7 +331,6 @@
             const resp = await apiCall(`/households/${currentHouseholdId}/members`, 'POST', { username: name });
             if (resp.ok) {
                 nameInput.value = '';
-                // Haushalt neu laden, um Mitgliederliste zu aktualisieren
                 await loadHouseholdById(currentHouseholdId);
             } else {
                 alert('Fehler beim Hinzufügen');
@@ -371,7 +400,6 @@
         }
 
         async function savePlans() {
-            // Sammle die Daten aus dem DOM, da editingPlans nur die Struktur hat, aber nicht die aktuellen Eingabewerte
             const container = document.getElementById('plansEditContainer');
             const roomBlocks = container.querySelectorAll('.room-block');
             const newPlans = [];
@@ -396,6 +424,15 @@
             } else {
                 alert('Fehler beim Speichern');
             }
+        }
+
+        // ---------- E-Mail speichern ----------
+        async function saveEmail() {
+            const email = document.getElementById('emailInput').value.trim();
+            if (!email) return;
+            const resp = await apiCall('/users/me/email', 'PUT', { email });
+            if (resp.ok) alert('E‑Mail gespeichert!');
+            else alert('Fehler beim Speichern');
         }
 
         // ---------- Zuteilungen anzeigen ----------

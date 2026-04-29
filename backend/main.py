@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from bson import ObjectId
 from jose import jwt, JWTError
 from backend.database import database, households_col, history_col, users_col
+from backend.email_utils import send_email
 from backend.models import HouseholdCreate, VetoRequest
 from backend.assignment import assign_plans
 from backend.auth import (
@@ -53,6 +54,45 @@ async def weekly_assignment_job():
         except Exception as e:
             print(f"Fehler bei Zuteilung für {household['_id']}: {e}")
 
+async def send_reminders_job():
+    """Samstags 19:00: E-Mail-Erinnerungen für alle unerledigten Aufgaben."""
+    today = datetime.utcnow().date()
+    # Morgen muss Sonntag sein
+    if (today.weekday() == 5):  # 0=Montag, 5=Samstag
+        async for household in households_col.find({}):
+            # Für jedes Mitglied checken
+            for user in household.get("members", []):
+                user_doc = await users_col.find_one({"username": user})
+                if not user_doc or not user_doc.get("email"):
+                    continue
+                tasks_to_do = []
+                assignments = household.get("current_week", {}).get("assignments", {})
+                for task_id in assignments.get(user, []):
+                    # Prüfen, ob schon erledigt
+                    completed = await history_col.find_one({
+                        "household_id": household["_id"],
+                        "week_start": household["current_week"]["week_start"],
+                        "user": user,
+                        "task_id": task_id,
+                        "completed": True
+                    })
+                    if not completed:
+                        # Aufgabenname aus cleaning_plans holen
+                        plan_id, task_idx = task_id.split("|")
+                        task_name = None
+                        for plan in household.get("cleaning_plans", []):
+                            if plan["id"] == plan_id:
+                                try:
+                                    task_name = plan["tasks"][int(task_idx)]["name"]
+                                except (IndexError, KeyError):
+                                    task_name = task_id
+                                break
+                        tasks_to_do.append(task_name or task_id)
+                if tasks_to_do:
+                    subject = f"Putzplan-Erinnerung für {user}"
+                    body = "Hallo,\n\nmorgen läuft die Putzplan-Woche ab! Bitte erledige:\n- " + "\n- ".join(tasks_to_do)
+                    send_email(user_doc["email"], subject, body)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -61,6 +101,11 @@ async def lifespan(app: FastAPI):
         weekly_assignment_job,
         CronTrigger(day_of_week='mon', hour=2, minute=0),  # Jeden Montag um 02:00 Uhr
         id='weekly_assignment'
+    )
+    scheduler.add_job(
+        send_reminders_job,
+        CronTrigger(day_of_week='sat', hour=19, minute=0),
+        id='send_reminders'
     )
     scheduler.start()
     print("Scheduler gestartet. Neue Zuteilung jeden Montag um 02:00 Uhr.")
@@ -352,6 +397,17 @@ async def join_household_by_code(code: str, user: str = Depends(get_current_user
     )
     household["_id"] = str(household["_id"])
     return household  # direkt den gesamten Haushalt zurückgeben, damit der Client ihn laden kann
+
+@app.put("/users/me/email")
+async def update_my_email(payload: dict, user: str = Depends(get_current_user)):
+    email = payload.get("email")
+    if not email:
+        raise HTTPException(400, "E-Mail‑Adresse erforderlich")
+    await users_col.update_one(
+        {"username": user},
+        {"$set": {"email": email}}
+    )
+    return {"message": "E-Mail‑Adresse gespeichert"}
 
 @app.on_event("startup")
 async def startup():
