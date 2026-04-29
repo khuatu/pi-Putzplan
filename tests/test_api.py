@@ -34,3 +34,27 @@ async def test_register_flow():
         assert resp.status_code == 200
         data = resp.json()
         assert "access_token" in data
+
+@pytest.mark.asyncio
+async def test_remove_member():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # Registrieren und einloggen
+        await ac.post("/register", json={"username": "boss", "password": "test"})
+        login_resp = await ac.post("/token", json={"username": "boss", "password": "test"})
+        token = login_resp.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        # Haushalt mit einem weiteren Mitglied anlegen
+        create_resp = await ac.post("/households", json={
+            "name": "Test",
+            "members": ["boss", "worker"],
+            "cleaning_plans": [{"id": "bad", "name": "Bad", "tasks": [{"name": "putzen", "interval_weeks": 1}]}]
+        }, headers=headers)
+        hid = create_resp.json()["_id"]
+        # Mitglied entfernen
+        del_resp = await ac.delete(f"/households/{hid}/members/worker", headers=headers)
+        assert del_resp.status_code == 200
+        # Prüfen, ob worker wirklich weg ist
+        get_resp = await ac.get(f"/households/{hid}", headers=headers)
+        members = get_resp.json()["members"]
+        assert "worker" not in members
