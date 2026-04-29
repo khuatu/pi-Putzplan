@@ -1,4 +1,5 @@
 # tests/test_imports.py
+import os
 
 def test_database_import():
     from backend.database import client, database
@@ -20,3 +21,8 @@ def test_assignment_import():
 def test_main_import():
     from backend.main import app
     assert app is not None
+
+def test_working_directory_exists():
+    # Dieser Test stellt sicher, dass das Arbeitsverzeichnis existiert
+    # und die Haupt-Python-Datei vorhanden ist
+    assert os.path.exists("backend/main.py")
