@@ -1,3 +1,4 @@
+<!-- frontend/index.html -->
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -8,52 +9,117 @@
     <title>Putzplan Bella-Wohnung</title>
     <style>
         body { font-family: sans-serif; max-width: 600px; margin: auto; padding: 1em; }
-        #loginArea, #mainApp { margin-top: 1em; }
+        .card { border: 1px solid #ddd; border-radius: 8px; padding: 1em; margin-bottom: 1em; background: #fafafa; }
+        .member { display: inline-block; background: #e0e0e0; border-radius: 20px; padding: 0.3em 0.8em; margin: 0.2em; }
+        .task { display: flex; justify-content: space-between; align-items: center; margin: 0.4em 0; }
+        button { padding: 0.4em 0.8em; border: none; border-radius: 4px; background: #4CAF50; color: white; cursor: pointer; }
+        button:hover { opacity: 0.8; }
+        button.danger { background: #d32f2f; }
+        input, select { padding: 0.4em; margin: 0.2em 0; width: calc(100% - 1em); box-sizing: border-box; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
     <h1>Putzplan Bella-Wohnung</h1>
+
+    <!-- Anmeldebereich (wird nach Login ausgeblendet) -->
     <div id="loginArea">
         <input type="text" id="usernameInput" placeholder="Benutzername">
         <input type="password" id="passwordInput" placeholder="Passwort">
         <button onclick="login()">Einloggen / Registrieren</button>
     </div>
-    <div id="mainApp" style="display:none">
-        <button onclick="createHousehold()">Neuen Haushalt erstellen</button>
-        <p>Haushalt-ID: <span id="householdId"></span></p>
-        <button onclick="connectWs()">WebSocket verbinden</button>
-        <div id="assignments"></div>
+
+    <!-- Hauptbereich (nach Login sichtbar) -->
+    <div id="mainApp" class="hidden">
+        <div class="card">
+            <h3>Haushalt</h3>
+            <p>Haushalt‑ID: <span id="currentHouseholdId">keine</span></p>
+            <button onclick="showCreateForm()">Neuen Haushalt erstellen</button>
+            <button onclick="showLoadForm()">Haushalt laden</button>
+            <button onclick="assignNewWeek()" id="assignBtn" disabled>Neue Zuteilung jetzt</button>
+        </div>
+
+        <!-- Haushalt erstellen / laden (wechselnde Formulare) -->
+        <div id="createForm" class="card hidden">
+            <h4>Neuen Haushalt anlegen</h4>
+            <input type="text" id="householdName" placeholder="Name (z.B. Bella-Wohnung)">
+            <input type="text" id="additionalMembers" placeholder="Weitere Mitglieder (Komma getrennt)">
+            <p>Aktuelle Räume (je mit Aufgaben):</p>
+            <div id="roomsContainer">
+                <!-- Dynamisch erzeugte Raum-Felder -->
+            </div>
+            <button onclick="addRoom()">Raum hinzufügen</button>
+            <button onclick="createHousehold()">Haushalt erstellen</button>
+        </div>
+
+        <div id="loadForm" class="card hidden">
+            <h4>Haushalt laden</h4>
+            <input type="text" id="loadHouseholdId" placeholder="Haushalt-ID">
+            <button onclick="loadHousehold()">Laden</button>
+        </div>
+
+        <!-- Mitglieder & Vetos -->
+        <div id="membersCard" class="card hidden">
+            <h3>Mitglieder</h3>
+            <div id="membersList"></div>
+            <button id="deleteMemberBtn" class="danger hidden" onclick="deleteSelectedMember()">Ausgewähltes Mitglied entfernen</button>
+        </div>
+
+        <!-- Zuteilungen -->
+        <div id="assignmentsCard" class="card hidden">
+            <h3>Aktuelle Zuteilung</h3>
+            <div id="assignmentsList"></div>
+        </div>
+
+        <!-- Offene Vetos -->
+        <div id="vetoCard" class="card hidden">
+            <h3>Offene Vetos</h3>
+            <div id="vetoList"></div>
+        </div>
     </div>
+
     <script>
-        let token = localStorage.getItem('token');
+        // ---------- Hilfsfunktionen ----------
+        let token = localStorage.getItem('token') || '';
         let currentHouseholdId = null;
+        let householdData = null;
         let ws = null;
+
+        function show(id) { document.getElementById(id).classList.remove('hidden'); }
+        function hide(id) { document.getElementById(id).classList.add('hidden'); }
 
         async function apiCall(url, method='GET', body=null) {
             const headers = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = 'Bearer ' + token;
             const resp = await fetch(url, {
-                method, headers,
+                method,
+                headers,
                 body: body ? JSON.stringify(body) : null
             });
             if (resp.status === 401) {
-                alert('Bitte einloggen');
+                alert('Sitzung abgelaufen. Bitte neu einloggen.');
                 localStorage.removeItem('token');
                 location.reload();
             }
             return resp;
         }
 
+        // ---------- Authentifizierung ----------
         async function login() {
-            const user = document.getElementById('usernameInput').value;
+            const user = document.getElementById('usernameInput').value.trim();
             const pass = document.getElementById('passwordInput').value;
+            if (!user || !pass) {
+                alert('Bitte Benutzername und Passwort eingeben');
+                return;
+            }
+            // Login versuchen
             let resp = await fetch('/token', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({username: user, password: pass})
             });
             if (!resp.ok) {
-                // Registrieren versuchen
+                // Registrieren
                 resp = await fetch('/register', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -63,7 +129,7 @@
                     alert('Fehler bei Anmeldung/Registrierung');
                     return;
                 }
-                // Nach Registrierung gleich einloggen
+                // Nach Registrierung erneut einloggen
                 resp = await fetch('/token', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -73,51 +139,242 @@
             const data = await resp.json();
             token = data.access_token;
             localStorage.setItem('token', token);
-            document.getElementById('loginArea').style.display = 'none';
-            document.getElementById('mainApp').style.display = 'block';
+            hide('loginArea');
+            show('mainApp');
+            // Automatisch gespeicherte Haushalt-ID laden
+            const savedId = localStorage.getItem('currentHouseholdId');
+            if (savedId) {
+                await loadHouseholdById(savedId);
+            }
+        }
+
+        // ---------- Haushalt erstellen / laden ----------
+        function showCreateForm() {
+            hide('loadForm');
+            show('createForm');
+        }
+
+        function showLoadForm() {
+            hide('createForm');
+            show('loadForm');
+        }
+
+        function addRoom() {
+            const container = document.getElementById('roomsContainer');
+            const div = document.createElement('div');
+            div.innerHTML = `
+                <input type="text" class="roomName" placeholder="Raumname (z.B. Bad)">
+                <input type="text" class="roomTasks" placeholder="Aufgaben (Komma getrennt)">
+            `;
+            container.appendChild(div);
         }
 
         async function createHousehold() {
-            const resp = await apiCall('/households', 'POST', {
-                name: "WG Berlin",
-                members: ["Anna", "Paul"],
-                cleaning_plans: [
-                    { id: "bad", name: "Bad", tasks: [
-                        {name: "Waschbecken", interval_weeks: 1},
-                        {name: "Boden wischen", interval_weeks: 2}
-                    ]}
-                ]
+            const name = document.getElementById('householdName').value.trim() || 'Mein Haushalt';
+            const additionalMembers = document.getElementById('additionalMembers').value.split(',').map(s => s.trim()).filter(s => s);
+            // Räume einsammeln
+            const roomNodes = document.querySelectorAll('#roomsContainer > div');
+            const cleaning_plans = [];
+            roomNodes.forEach(div => {
+                const roomName = div.querySelector('.roomName').value.trim();
+                const tasksStr = div.querySelector('.roomTasks').value.trim();
+                if (roomName && tasksStr) {
+                    const tasks = tasksStr.split(',').map(t => ({ name: t.trim(), interval_weeks: 1 }));
+                    cleaning_plans.push({ id: roomName.toLowerCase().replace(/\s/g, '_'), name: roomName, tasks });
+                }
             });
+            if (cleaning_plans.length === 0) {
+                alert('Bitte mindestens einen Raum mit Aufgaben angeben');
+                return;
+            }
+            // Aktuellen Benutzer automatisch als Mitglied hinzufügen
+            const currentUser = document.getElementById('usernameInput').value.trim();
+            const members = [currentUser, ...additionalMembers.filter(m => m !== currentUser)];
+            const payload = {
+                name,
+                members,
+                cleaning_plans
+            };
+            const resp = await apiCall('/households', 'POST', payload);
             if (resp.ok) {
                 const h = await resp.json();
-                currentHouseholdId = h._id;
-                document.getElementById('householdId').innerText = h._id;
-                showAssignments(h);
+                setHousehold(h);
+                hide('createForm');
+            } else {
+                alert('Fehler beim Erstellen');
             }
         }
 
-        function connectWs() {
-            if (!currentHouseholdId) return;
+        async function loadHousehold() {
+            const id = document.getElementById('loadHouseholdId').value.trim();
+            if (!id) return;
+            await loadHouseholdById(id);
+        }
+
+        async function loadHouseholdById(id) {
+            const resp = await apiCall(`/households/${id}`);
+            if (resp.ok) {
+                const h = await resp.json();
+                setHousehold(h);
+            } else {
+                alert('Haushalt nicht gefunden');
+            }
+        }
+
+        function setHousehold(h) {
+            householdData = h;
+            currentHouseholdId = h._id;
+            document.getElementById('currentHouseholdId').innerText = h._id;
+            localStorage.setItem('currentHouseholdId', h._id);
+            document.getElementById('assignBtn').disabled = false;
+            show('membersCard');
+            show('assignmentsCard');
+            renderMembers();
+            renderAssignments();
+            renderVetos();
+            connectWebSocket();
+        }
+
+        // ---------- WebSocket ----------
+        function connectWebSocket() {
             if (ws) ws.close();
             ws = new WebSocket(`ws://${location.host}/ws/${currentHouseholdId}?token=${token}`);
-            ws.onmessage = e => showAssignments(JSON.parse(e.data));
+            ws.onmessage = (e) => {
+                const h = JSON.parse(e.data);
+                householdData = h;
+                renderMembers();
+                renderAssignments();
+                renderVetos();
+            };
+            ws.onclose = () => console.log('WebSocket geschlossen');
         }
 
-        function showAssignments(household) {
-            const div = document.getElementById('assignments');
-            div.innerHTML = '';
-            const a = household.current_week?.assignments || {};
-            for (let [user, tasks] of Object.entries(a)) {
-                div.innerHTML += `<p><b>${user}</b>: ${tasks.join(', ')}</p>`;
+        // ---------- Mitglieder anzeigen ----------
+        function renderMembers() {
+            const list = document.getElementById('membersList');
+            list.innerHTML = '';
+            if (!householdData) return;
+            householdData.members.forEach(m => {
+                const span = document.createElement('span');
+                span.className = 'member';
+                span.textContent = m;
+                span.onclick = () => selectMember(m);
+                list.appendChild(span);
+                list.appendChild(document.createTextNode(' '));
+            });
+        }
+
+        let selectedMember = null;
+        function selectMember(name) {
+            selectedMember = name;
+            const btn = document.getElementById('deleteMemberBtn');
+            btn.classList.remove('hidden');
+            btn.innerText = `Mitglied "${name}" entfernen`;
+        }
+
+        async function deleteSelectedMember() {
+            if (!selectedMember || !currentHouseholdId) return;
+            if (!confirm(`Möchtest du "${selectedMember}" wirklich entfernen?`)) return;
+            const resp = await apiCall(`/households/${currentHouseholdId}/members/${encodeURIComponent(selectedMember)}`, 'DELETE');
+            if (resp.ok) {
+                alert('Mitglied entfernt');
+                // Daten neu laden
+                await loadHouseholdById(currentHouseholdId);
+                selectedMember = null;
+                hide('deleteMemberBtn');
+            } else {
+                alert('Fehler beim Entfernen');
             }
         }
 
-        if (token) {
-            document.getElementById('loginArea').style.display = 'none';
-            document.getElementById('mainApp').style.display = 'block';
+        // ---------- Zuteilungen und Aufgaben ----------
+        function renderAssignments() {
+            const container = document.getElementById('assignmentsList');
+            container.innerHTML = '';
+            if (!householdData || !householdData.current_week) return;
+            const assignments = householdData.current_week.assignments || {};
+            const plans = householdData.cleaning_plans || [];
+            // Erstelle eine Map task_id -> anzeigbarer Name
+            const taskInfo = {};
+            plans.forEach(plan => {
+                plan.tasks.forEach((task, idx) => {
+                    const tid = `${plan.id}|${idx}`;
+                    taskInfo[tid] = `${task.name} (${plan.name})`;
+                });
+            });
+            for (const [user, taskIds] of Object.entries(assignments)) {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `<strong>${user}</strong>`;
+                const taskList = document.createElement('div');
+                taskIds.forEach(tid => {
+                    const taskDiv = document.createElement('div');
+                    taskDiv.className = 'task';
+                    taskDiv.innerHTML = `<span>${taskInfo[tid] || tid}</span>`;
+                    const doneBtn = document.createElement('button');
+                    doneBtn.textContent = 'Erledigt';
+                    doneBtn.onclick = async () => {
+                        await apiCall(`/households/${currentHouseholdId}/complete`, 'POST', { user, task_id: tid });
+                    };
+                    taskDiv.appendChild(doneBtn);
+                    taskList.appendChild(taskDiv);
+                });
+                card.appendChild(taskList);
+                // Veto-Button für diesen Nutzer
+                const vetoBtn = document.createElement('button');
+                vetoBtn.textContent = 'Veto einlegen';
+                vetoBtn.onclick = async () => {
+                    await apiCall(`/households/${currentHouseholdId}/veto`, 'POST', { by_user: user, accepted_by: [] });
+                };
+                card.appendChild(vetoBtn);
+                container.appendChild(card);
+            }
         }
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/static/sw.js');
+
+        // ---------- Veto-Anzeige ----------
+        function renderVetos() {
+            const container = document.getElementById('vetoList');
+            container.innerHTML = '';
+            if (!householdData || !householdData.veto_requests) return;
+            const vetos = householdData.veto_requests;
+            if (vetos.length === 0) {
+                hide('vetoCard');
+                return;
+            }
+            show('vetoCard');
+            vetos.forEach(async (v, idx) => {
+                const div = document.createElement('div');
+                div.innerHTML = `<p><b>${v.by_user}</b> hat Veto eingelegt. Zugestimmt: ${v.accepted_by.join(', ') || 'niemand'}</p>`;
+                const acceptBtn = document.createElement('button');
+                acceptBtn.textContent = 'Zustimmen';
+                acceptBtn.onclick = async () => {
+                    const currentUser = document.getElementById('usernameInput').value.trim();
+                    await apiCall(`/households/${currentHouseholdId}/veto/accept`, 'POST', { user: currentUser });
+                };
+                div.appendChild(acceptBtn);
+                container.appendChild(div);
+            });
+        }
+
+        // ---------- Manuelle Zuteilung ----------
+        async function assignNewWeek() {
+            if (!currentHouseholdId) return;
+            const resp = await apiCall(`/households/${currentHouseholdId}/assign`, 'POST');
+            if (resp.ok) {
+                alert('Neue Zuteilung wurde berechnet');
+                // WebSocket sorgt für Aktualisierung, zur Sicherheit neu laden
+                await loadHouseholdById(currentHouseholdId);
+            } else {
+                alert('Fehler beim Anstoßen der Zuteilung');
+            }
+        }
+
+        // ---------- Initial ----------
+        if (token) {
+            hide('loginArea');
+            show('mainApp');
+            const savedId = localStorage.getItem('currentHouseholdId');
+            if (savedId) loadHouseholdById(savedId);
         }
     </script>
 </body>
