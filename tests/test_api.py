@@ -58,3 +58,33 @@ async def test_remove_member():
         get_resp = await ac.get(f"/households/{hid}", headers=headers)
         members = get_resp.json()["members"]
         assert "worker" not in members
+
+@pytest.mark.asyncio
+async def test_add_member_and_access_control():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # Zwei Benutzer registrieren
+        await ac.post("/register", json={"username": "admin", "password": "test"})
+        await ac.post("/register", json={"username": "friend", "password": "test"})
+        # admin einloggen
+        resp = await ac.post("/token", json={"username": "admin", "password": "test"})
+        admin_token = resp.json()["access_token"]
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        # Haushalt erstellen (nur admin)
+        create_resp = await ac.post("/households", json={
+            "name": "TestWG",
+            "members": ["admin"],
+            "cleaning_plans": []
+        }, headers=headers)
+        hid = create_resp.json()["_id"]
+        # friend kann nicht zugreifen (403)
+        friend_resp = await ac.post("/token", json={"username": "friend", "password": "test"})
+        friend_token = friend_resp.json()["access_token"]
+        get_resp = await ac.get(f"/households/{hid}", headers={"Authorization": f"Bearer {friend_token}"})
+        assert get_resp.status_code == 403
+        # admin fügt friend hinzu
+        add_resp = await ac.post(f"/households/{hid}/members", json={"username": "friend"}, headers=headers)
+        assert add_resp.status_code == 200
+        # jetzt darf friend zugreifen
+        get_resp = await ac.get(f"/households/{hid}", headers={"Authorization": f"Bearer {friend_token}"})
+        assert get_resp.status_code == 200
