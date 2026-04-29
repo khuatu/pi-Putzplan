@@ -1,5 +1,7 @@
 name: Run Tests
+
 on: [push, pull_request]
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -10,13 +12,27 @@ jobs:
           - 27017:27017
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.14'
+      - name: Wait for MongoDB
+        run: |
+          sudo apt-get update && sudo apt-get install -y netcat-openbsd
+          echo "Warte auf MongoDB..."
+          for i in {1..30}; do
+            if nc -z localhost 27017; then
+              echo "MongoDB ist bereit."
+              break
+            fi
+            echo "Noch nicht bereit, warte 2s..."
+            sleep 2
+          done
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
       - name: Run tests
         env:
-          MONGO_URI: mongodb://localhost:27017
+          MONGO_URI: mongodb://localhost:27017/?serverSelectionTimeoutMS=5000
         run: pytest tests/
