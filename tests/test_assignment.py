@@ -40,6 +40,6 @@ async def test_assign_plans_basic(sample_household):
         # Jeder sollte mind. eine Aufgabe haben, wenn aktive Aufgaben existieren
         assert len(assignments["Anna"]) > 0
         assert len(assignments["Paul"]) > 0
-        # Zusammen sollen alle aktiven Aufgaben abgedeckt sein
-        all_tasks = assignments["Anna"] + assignments["Paul"]
-        assert "bad|0" in all_tasks or "kueche|0" in all_tasks
+
+        all_items = assignments["Anna"] + assignments["Paul"]
+        assert "bad" in all_items or "kueche" in all_items
