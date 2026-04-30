@@ -15,3 +15,15 @@ def test_send_email_with_mock():
             from backend.email_utils import send_email
             send_email("test@example.com", "Test", "Hallo Welt")
             mock_sg.assert_called_once()
+
+def test_register_triggers_confirmation_email():
+    with patch("backend.email_utils.SendGridAPIClient") as mock_sg:
+        with patch("backend.email_utils.send_email") as mock_send:
+            # Wir simulieren einen Registrierungs-Request
+            # Dazu rufen wir direkt die Funktion auf? Besser: einen einfachen Mock-Test
+            from backend.main import register
+            import asyncio
+            # Da register async ist, müssen wir es ausführen
+            async def run_register():
+                # Einen Fake-Request bauen? Nicht nötig, wir mocken die DB gleich
+                pass
