@@ -145,3 +145,38 @@ async def test_delete_household():
         # Haushalt sollte jetzt nicht mehr existieren
         get_resp = await ac.get(f"/households/{hid}", headers=headers_owner)
         assert get_resp.status_code == 404
+
+@pytest.mark.asyncio
+async def test_saving_plans_triggers_assignment():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # Registrieren & einloggen
+        await ac.post("/register", json={"username": "planner", "password": "test", "email": "plan@test.com"})
+        resp = await ac.post("/token", json={"username": "planner", "password": "test"})
+        token = resp.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Haushalt ohne Pläne anlegen
+        resp = await ac.post("/households", json={
+            "name": "PlanHaus",
+            "members": ["planner"],
+            "cleaning_plans": []
+        }, headers=headers)
+        hid = resp.json()["_id"]
+
+        # Pläne setzen
+        resp = await ac.put(f"/households/{hid}/plans", json={
+            "cleaning_plans": [{"id": "bad", "name": "Bad", "tasks": [{"name": "Boden wischen"}], "interval_weeks": 1}]
+        }, headers=headers)
+        assert resp.status_code == 200
+
+        # Zuteilung manuell anstoßen (simuliert das, was das Frontend macht)
+        resp = await ac.post(f"/households/{hid}/assign", headers=headers)
+        assert resp.status_code == 200
+
+        # Haushalt neu laden und prüfen, ob Zuteilung existiert
+        resp = await ac.get(f"/households/{hid}", headers=headers)
+        household = resp.json()
+        assignments = household["current_week"]["assignments"]
+        assert "planner" in assignments
+        assert len(assignments["planner"]) >= 1

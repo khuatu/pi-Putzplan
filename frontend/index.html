@@ -99,12 +99,7 @@
             </div>
         </div>
 
-        <!-- Meine E-Mail -->
-        <div class="card">
-            <h3>Meine E‑Mail</h3>
-            <input type="email" id="myEmailInput" placeholder="deine@email.de">
-            <button onclick="saveEmail()">Speichern</button>
-        </div>
+
 
         <!-- Zuteilungen -->
         <div id="assignmentsCard" class="card hidden">
@@ -482,17 +477,7 @@
             }
         }
 
-        // ---------- E-Mail speichern ----------
-        async function saveEmail() {
-            const email = document.getElementById('myEmailInput').value.trim();
-            if (!email) return;
-            const resp = await apiCall('/users/me/email', 'PUT', { email });
-            if (resp.ok) alert('E‑Mail geändert. Bitte bestätige den Link in der neuen Mail.');
-            else {
-                const data = await resp.json();
-                alert(data.detail || 'Fehler');
-            }
-        }
+
 
         // ---------- Zuteilungen anzeigen (Räume mit Checklisten) ----------
         function renderAssignments() {
