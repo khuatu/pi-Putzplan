@@ -28,11 +28,14 @@ async def run_telegram_bot():
     if not TELEGRAM_TOKEN:
         print("Telegram-Token fehlt. Bot wird nicht gestartet.")
         return
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("register", register))
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    while True:
-        await asyncio.sleep(3600)
+    try:
+        app = Application.builder().token(TELEGRAM_TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("register", register))
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling()
+        while True:
+            await asyncio.sleep(3600)
+    except Exception as e:
+        print(f"Telegram-Bot konnte nicht gestartet werden: {e}")

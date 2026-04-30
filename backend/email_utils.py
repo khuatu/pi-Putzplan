@@ -4,7 +4,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "putzplan@example.com")  # verifizierte Adresse
+FROM_EMAIL = os.getenv("FROM_EMAIL", "bella_putzplan@proton.me")   # Deine verifizierte Absenderadresse
 
 def send_email(to_email: str, subject: str, body: str):
     if not SENDGRID_API_KEY:

@@ -188,3 +188,15 @@ async def test_saving_plans_triggers_assignment():
         assignments = household["current_week"]["assignments"]
         assert "planner" in assignments
         assert len(assignments["planner"]) >= 1
+
+@pytest.mark.asyncio
+async def test_register_duplicate_email_fails():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # Zuerst einen Benutzer anlegen
+        await ac.post("/register", json={"username": "original", "password": "test", "email": "dup@test.com"})
+        # Zweiter Benutzer mit gleicher E‑Mail muss scheitern
+        resp = await ac.post("/register", json={"username": "copycat", "password": "test", "email": "dup@test.com"})
+        assert resp.status_code == 400
+        data = resp.json()
+        assert "E‑Mail‑Adresse wird bereits verwendet" in data["detail"]

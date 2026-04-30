@@ -27,3 +27,23 @@ def test_register_triggers_confirmation_email():
             async def run_register():
                 # Einen Fake-Request bauen? Nicht nötig, wir mocken die DB gleich
                 pass
+
+
+def test_send_email_end_to_end():
+    """Testet den E-Mail-Versand mit einer echten API-Verbindung."""
+    api_key = os.getenv("SENDGRID_API_KEY")
+    if not api_key:
+        pytest.skip("SENDGRID_API_KEY nicht gesetzt. E-Mail-Integrationstest wird übersprungen.")
+
+    from backend.email_utils import send_email
+
+    # Temporär den Empfänger auf eine Test-Adresse setzen
+    test_recipient = "test@example.com"  # Hier eine Adresse für einen Test-Account einfügen
+
+    try:
+        # Dieser Aufruf wird nun einen echten API-Call ausführen
+        send_email(test_recipient, "Pytest Integration Test", "Dies ist eine Test-E-Mail.")
+        # In einem echten Szenario könnte man hier die SendGrid Activity API pollen,
+        # aber fürs Erste ist das Nicht-Auftreten einer Exception ein Erfolg.
+    except Exception as e:
+        pytest.fail(f"send_email schlug fehl: {e}")
