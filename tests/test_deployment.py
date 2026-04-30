@@ -54,3 +54,14 @@ def test_port_8000_not_bound():
     )
     lines = [line for line in result.stdout.splitlines() if ":8000" in line]
     assert len(lines) <= 1, f"Port 8000 wird mehrfach belegt:\n{result.stdout}"
+
+def test_sendgrid_env_in_service_file():
+    if not is_pi():
+        pytest.skip("Nur auf dem Pi relevant")
+    import subprocess
+    result = subprocess.run(
+        "sudo systemctl show putzplan.service -p Environment | grep 'SENDGRID_API_KEY='",
+        shell=True, capture_output=True, text=True
+    )
+    assert result.returncode == 0, "SENDGRID_API_KEY fehlt in der systemd‑Unit"
+    assert "SG." in result.stdout, "SENDGRID_API_KEY enthält nicht das erwartete Format"
