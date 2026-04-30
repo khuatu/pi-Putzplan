@@ -1,7 +1,33 @@
-# tests/test_api.py
 import pytest
+import asyncio
 from httpx import AsyncClient, ASGITransport
+from motor.motor_asyncio import AsyncIOMotorClient
+from backend.database import MONGO_URI
 from backend.main import app
+
+@pytest.fixture(scope="module")
+async def ensure_db():
+    """Wartet, bis die MongoDB erreichbar ist."""
+    for _ in range(10):
+        try:
+            client = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=2000)
+            await client.server_info()
+            print("MongoDB ist bereit.")
+            return
+        except Exception:
+            await asyncio.sleep(2)
+    pytest.fail("MongoDB konnte nicht erreicht werden.")
+
+@pytest.mark.asyncio
+async def test_register_and_login(ensure_db):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/register", json={"username": "testuser", "password": "test123"})
+        assert resp.status_code in [200, 400]
+        resp = await ac.post("/token", json={"username": "testuser", "password": "test123"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "access_token" in data
 
 @pytest.mark.asyncio
 async def test_register_and_login():
