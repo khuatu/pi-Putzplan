@@ -150,8 +150,16 @@ async def test_delete_household():
 async def test_saving_plans_triggers_assignment():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        # Registrieren & einloggen
-        await ac.post("/register", json={"username": "planner", "password": "test", "email": "plan@test.com"})
+        # Registrierung ohne E‑Mail senden (mocked)
+        with patch("backend.email_utils.send_email") as mock_send:
+            resp = await ac.post("/register", json={"username": "planner", "password": "test", "email": "plan@test.com"})
+            # Der Benutzer muss die E‑Mail bestätigen – das umgehen wir, indem wir in der DB direkt email_verified setzen
+            from backend.database import users_col
+            await users_col.update_one(
+                {"username": "planner"},
+                {"$set": {"email_verified": True}}
+            )
+        # Einloggen
         resp = await ac.post("/token", json={"username": "planner", "password": "test"})
         token = resp.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -170,7 +178,7 @@ async def test_saving_plans_triggers_assignment():
         }, headers=headers)
         assert resp.status_code == 200
 
-        # Zuteilung manuell anstoßen (simuliert das, was das Frontend macht)
+        # Zuteilung manuell anstoßen
         resp = await ac.post(f"/households/{hid}/assign", headers=headers)
         assert resp.status_code == 200
 

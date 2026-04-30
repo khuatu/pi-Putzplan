@@ -8,8 +8,14 @@ from backend.database import households_col
 async def test_invite_flow():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        # Registrieren und einloggen als Ersteller
-        await ac.post("/register", json={"username": "creator", "password": "test"})
+        with patch("backend.email_utils.send_email") as mock_send:
+            await ac.post("/register", json={"username": "creator", "password": "test", "email": "creator@test.com"})
+            # Direkt verifizieren, damit Login möglich ist
+            from backend.database import users_col
+            await users_col.update_one(
+                {"username": "creator"},
+                {"$set": {"email_verified": True}}
+            )
         login_resp = await ac.post("/token", json={"username": "creator", "password": "test"})
         token = login_resp.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
