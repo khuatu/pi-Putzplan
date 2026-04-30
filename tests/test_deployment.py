@@ -65,3 +65,10 @@ def test_sendgrid_env_in_service_file():
     )
     assert result.returncode == 0, "SENDGRID_API_KEY fehlt in der systemd‑Unit"
     assert "SG." in result.stdout, "SENDGRID_API_KEY enthält nicht das erwartete Format"
+
+def test_sendgrid_configuration():
+    from backend.email_utils import SENDGRID_API_KEY, FROM_EMAIL
+    if not SENDGRID_API_KEY:
+        pytest.skip("SENDGRID_API_KEY nicht gesetzt")
+    assert SENDGRID_API_KEY.startswith("SG."), "API‑Key muss mit 'SG.' beginnen"
+    assert "@" in FROM_EMAIL, "FROM_EMAIL muss eine gültige E‑Mail‑Adresse sein"

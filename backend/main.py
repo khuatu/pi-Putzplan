@@ -117,10 +117,14 @@ async def register(payload: dict, background_tasks: BackgroundTasks):
     email = payload.get("email")
     if not username or not password or not email:
         raise HTTPException(400, "Benutzername, Passwort und E‑Mail erforderlich")
+    # Einfache Prüfung, ob die E‑Mail überhaupt ein @-Zeichen enthält
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(400, "Ungültige E‑Mail‑Adresse")
     if await users_col.find_one({"username": username}):
         raise HTTPException(400, "Benutzername bereits vergeben")
     if await users_col.find_one({"email": email}):
         raise HTTPException(400, "E‑Mail‑Adresse wird bereits verwendet")
+
     code = secrets.token_hex(16)
     hashed = hash_password(password)
     await users_col.insert_one({
@@ -131,15 +135,12 @@ async def register(payload: dict, background_tasks: BackgroundTasks):
         "verification_code": code
     })
     verify_link = f"http://192.168.178.40:8000/verify?code={code}"
-
-    # E‑Mail als Hintergrundaufgabe senden, damit die Registrierung nicht blockiert wird
     background_tasks.add_task(
         send_email,
         email,
         "Putzplan – E‑Mail bestätigen",
         f"Hallo {username},\n\nbitte bestätige deine E‑Mail mit diesem Link: {verify_link}"
     )
-
     return {"message": "Registrierung erfolgreich. Bitte bestätige deine E‑Mail."}
 
 @app.get("/verify")
