@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from bson import ObjectId
@@ -108,10 +108,10 @@ async def index():
     return FileResponse("frontend/index.html")
 
 # ------------------------------
-# Registrierung mit E‑Mail‑Bestätigung
+# Registrierung mit E‑Mail‑Bestätigung (Hintergrundaufgabe)
 # ------------------------------
 @app.post("/register")
-async def register(payload: dict):
+async def register(payload: dict, background_tasks: BackgroundTasks):
     username = payload.get("username")
     password = payload.get("password")
     email = payload.get("email")
@@ -131,7 +131,15 @@ async def register(payload: dict):
         "verification_code": code
     })
     verify_link = f"http://192.168.178.40:8000/verify?code={code}"
-    send_email(email, "Putzplan – E‑Mail bestätigen", f"Hallo {username},\n\nbitte bestätige deine E‑Mail mit diesem Link: {verify_link}")
+
+    # E‑Mail als Hintergrundaufgabe senden, damit die Registrierung nicht blockiert wird
+    background_tasks.add_task(
+        send_email,
+        email,
+        "Putzplan – E‑Mail bestätigen",
+        f"Hallo {username},\n\nbitte bestätige deine E‑Mail mit diesem Link: {verify_link}"
+    )
+
     return {"message": "Registrierung erfolgreich. Bitte bestätige deine E‑Mail."}
 
 @app.get("/verify")
@@ -157,7 +165,7 @@ async def login(payload: dict):
             {"_id": user_doc["_id"]},
             {"$set": {"email_verified": True}}
         )
-    elif not user_doc["email_verified"]:
+    elif not user_doc.get("email_verified"):
         raise HTTPException(403, "E‑Mail noch nicht bestätigt")
     token = create_access_token(data={"sub": username})
     return {"access_token": token, "token_type": "bearer"}
@@ -169,7 +177,6 @@ async def update_my_email(payload: dict, user: str = Depends(get_current_user)):
         raise HTTPException(400, "E‑Mail erforderlich")
     if await users_col.find_one({"email": new_email, "username": {"$ne": user}}):
         raise HTTPException(400, "E‑Mail wird bereits von einem anderen Benutzer verwendet")
-    # Neuen Bestätigungscode senden
     code = secrets.token_hex(16)
     await users_col.update_one(
         {"username": user},
@@ -197,7 +204,7 @@ async def create_household(data: HouseholdCreate, user: str = Depends(get_curren
         "name": data.name,
         "members": data.members,
         "cleaning_plans": [plan.dict() for plan in data.cleaning_plans],
-        "allocation_mode": "rooms",   # neuer Standard: Räume werden verteilt
+        "allocation_mode": "rooms",   # Standard: Räume werden verteilt
         "created_by": user,
         "invite_code": code,
         "current_week": {
