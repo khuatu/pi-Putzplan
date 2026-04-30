@@ -10,11 +10,11 @@ def test_sendgrid_api_key_is_set():
     assert key.startswith("SG."), "API‑Key hat nicht das erwartete Format"
 
 def test_send_email_with_mock():
-    with patch.dict("os.environ", {"SENDGRID_API_KEY": "SG.dummy_key"}):
-        with patch("backend.email_utils.SendGridAPIClient") as mock_sg:
-            from backend.email_utils import send_email
-            send_email("test@example.com", "Test", "Hallo Welt")
-            mock_sg.assert_called_once()
+    with patch("backend.email_utils.SendGridAPIClient") as mock_sg, \
+         patch("backend.email_utils.SENDGRID_API_KEY", "SG.dummy_key"):
+        from backend.email_utils import send_email
+        send_email("test@example.com", "Test", "Hallo Welt")
+        mock_sg.assert_called_once()
 
 def test_register_triggers_confirmation_email():
     with patch("backend.email_utils.SendGridAPIClient") as mock_sg:
