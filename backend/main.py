@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from bson import ObjectId
@@ -13,7 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from backend.database import database, households_col, history_col, users_col
-from backend.models import HouseholdCreate, VetoRequest
+from backend.models import HouseholdCreate, VetoRequest, MessageCreate
 from backend.assignment import assign_plans
 from backend.auth import (
     hash_password, verify_password, create_access_token, get_current_user,
@@ -28,7 +28,7 @@ from backend.email_utils import send_email
 scheduler = AsyncIOScheduler()
 
 async def weekly_assignment_job():
-    """Jede Woche (Standard: Montag 02:00) für alle Haushalte neue Zuteilung berechnen."""
+    """Jede Woche (Montag 02:00) für alle Haushalte neue Zuteilung berechnen."""
     async for household in households_col.find({}):
         try:
             assignments = await assign_plans(household)
@@ -46,32 +46,31 @@ async def weekly_assignment_job():
             print(f"Fehler bei Zuteilung für {household['_id']}: {e}")
 
 async def send_reminders_job():
-    """Jeden Samstag 19:00 Uhr: E‑Mail‑Erinnerungen an alle Mitglieder mit offenen Räumen/Aufgaben."""
+    """Samstags 19:00 Uhr: E‑Mail‑Erinnerungen an alle Mitglieder mit offenen Räumen."""
     now = datetime.now(timezone.utc)
     if now.weekday() != 5:  # 5 = Samstag
         return
     async for household in households_col.find({}):
         for username in household.get("members", []):
             user_doc = await users_col.find_one({"username": username})
-            if not user_doc or not user_doc.get("email"):
+            if not user_doc or not user_doc.get("email_verified"):
                 continue
-            # Offene Räume/Aufgaben ermitteln
             open_items = []
             assignments = household.get("current_week", {}).get("assignments", {})
             for assigned_user, items in assignments.items():
                 if assigned_user != username:
                     continue
                 for item in items:
-                    # Prüfung, ob in dieser Woche bereits erledigt
+                    # Prüfen, ob bereits erledigt
                     completed = await history_col.find_one({
                         "household_id": household["_id"],
                         "week_start": household["current_week"]["week_start"],
                         "user": username,
-                        "$or": [{"plan_id": item}, {"task_id": item}],
+                        "plan_id": item,
                         "completed": True
                     })
                     if not completed:
-                        # Versuche, einen schöneren Namen zu finden
+                        # Name des Raums ermitteln
                         plan_name = item
                         for plan in household.get("cleaning_plans", []):
                             if plan["id"] == item:
@@ -90,8 +89,8 @@ async def send_reminders_job():
 async def lifespan(app: FastAPI):
     # Startup
     asyncio.create_task(run_telegram_bot())
-    scheduler.add_job(weekly_assignment_job, CronTrigger(day_of_week='mon', hour=2, minute=0), id='weekly_assignment')
-    scheduler.add_job(send_reminders_job, CronTrigger(day_of_week='sat', hour=19, minute=0), id='send_reminders')
+    scheduler.add_job(weekly_assignment_job, CronTrigger(day_of_week='mon', hour=2, minute=0), id='weekly')
+    scheduler.add_job(send_reminders_job, CronTrigger(day_of_week='sat', hour=19, minute=0), id='reminders')
     scheduler.start()
     print("Scheduler gestartet.")
     yield
@@ -99,11 +98,9 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 # ------------------------------
-# FastAPI‑App erstellen
+# FastAPI‑App
 # ------------------------------
 app = FastAPI(lifespan=lifespan)
-
-# Statische Dateien (Frontend) ausliefern
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 @app.get("/")
@@ -111,24 +108,41 @@ async def index():
     return FileResponse("frontend/index.html")
 
 # ------------------------------
-# Authentifizierung
+# Registrierung mit E‑Mail‑Bestätigung
 # ------------------------------
 @app.post("/register")
 async def register(payload: dict):
     username = payload.get("username")
     password = payload.get("password")
-    if not username or not password:
-        raise HTTPException(400, "Benutzername und Passwort erforderlich")
+    email = payload.get("email")
+    if not username or not password or not email:
+        raise HTTPException(400, "Benutzername, Passwort und E‑Mail erforderlich")
     if await users_col.find_one({"username": username}):
-        raise HTTPException(400, "Benutzer existiert bereits")
+        raise HTTPException(400, "Benutzername bereits vergeben")
+    if await users_col.find_one({"email": email}):
+        raise HTTPException(400, "E‑Mail‑Adresse wird bereits verwendet")
+    code = secrets.token_hex(16)
     hashed = hash_password(password)
     await users_col.insert_one({
         "username": username,
         "hashed_password": hashed,
-        "email": None,
-        "telegram_chat_id": None
+        "email": email,
+        "email_verified": False,
+        "verification_code": code
     })
-    return {"message": "Registrierung erfolgreich"}
+    verify_link = f"http://192.168.178.40:8000/verify?code={code}"
+    send_email(email, "Putzplan – E‑Mail bestätigen", f"Hallo {username},\n\nbitte bestätige deine E‑Mail mit diesem Link: {verify_link}")
+    return {"message": "Registrierung erfolgreich. Bitte bestätige deine E‑Mail."}
+
+@app.get("/verify")
+async def verify_email(code: str):
+    user = await users_col.find_one_and_update(
+        {"verification_code": code, "email_verified": False},
+        {"$set": {"email_verified": True, "verification_code": None}}
+    )
+    if not user:
+        raise HTTPException(400, "Ungültiger oder bereits verwendeter Bestätigungscode")
+    return {"message": "E‑Mail bestätigt. Du kannst dich jetzt einloggen."}
 
 @app.post("/token")
 async def login(payload: dict):
@@ -137,31 +151,38 @@ async def login(payload: dict):
     user_doc = await users_col.find_one({"username": username})
     if not user_doc or not verify_password(password, user_doc["hashed_password"]):
         raise HTTPException(401, "Anmeldedaten ungültig")
+    if not user_doc.get("email_verified"):
+        raise HTTPException(403, "E‑Mail noch nicht bestätigt")
     token = create_access_token(data={"sub": username})
     return {"access_token": token, "token_type": "bearer"}
 
-# ------------------------------
-# Benutzer‑E‑Mail speichern
-# ------------------------------
 @app.put("/users/me/email")
 async def update_my_email(payload: dict, user: str = Depends(get_current_user)):
-    email = payload.get("email")
-    if not email:
-        raise HTTPException(400, "E‑Mail‑Adresse erforderlich")
+    new_email = payload.get("email")
+    if not new_email:
+        raise HTTPException(400, "E‑Mail erforderlich")
+    if await users_col.find_one({"email": new_email, "username": {"$ne": user}}):
+        raise HTTPException(400, "E‑Mail wird bereits von einem anderen Benutzer verwendet")
+    # Neuen Bestätigungscode senden
+    code = secrets.token_hex(16)
     await users_col.update_one(
         {"username": user},
-        {"$set": {"email": email}}
+        {"$set": {"email": new_email, "email_verified": False, "verification_code": code}}
     )
-    return {"message": "E‑Mail‑Adresse gespeichert"}
+    verify_link = f"http://192.168.178.40:8000/verify?code={code}"
+    send_email(new_email, "Putzplan – Neue E‑Mail bestätigen", f"Bitte bestätige deine neue E‑Mail: {verify_link}")
+    return {"message": "E‑Mail geändert. Bitte bestätigen."}
 
 # ------------------------------
-# Haushalts‑Routen (alle geschützt)
+# Haushalte (eindeutige Namen, Raum‑Modus)
 # ------------------------------
 @app.post("/households", status_code=201)
 async def create_household(data: HouseholdCreate, user: str = Depends(get_current_user)):
+    # Eindeutigkeit des Namens prüfen
+    if await households_col.find_one({"name": data.name}):
+        raise HTTPException(400, "Ein Haushalt mit diesem Namen existiert bereits")
     if user not in data.members:
         data.members.append(user)
-    # Einladungscode generieren (6 Hex‑Zeichen + Bindestrich + 3 Ziffern)
     while True:
         code = f"{secrets.token_hex(3)}-{secrets.randbelow(1000):03d}"
         if not await households_col.find_one({"invite_code": code}):
@@ -170,7 +191,7 @@ async def create_household(data: HouseholdCreate, user: str = Depends(get_curren
         "name": data.name,
         "members": data.members,
         "cleaning_plans": [plan.dict() for plan in data.cleaning_plans],
-        "allocation_mode": data.allocation_mode,
+        "allocation_mode": "rooms",   # neuer Standard: Räume werden verteilt
         "created_by": user,
         "invite_code": code,
         "current_week": {
@@ -190,6 +211,16 @@ async def create_household(data: HouseholdCreate, user: str = Depends(get_curren
     household["_id"] = str(household["_id"])
     return household
 
+@app.get("/households/by_name/{name}")
+async def get_household_by_name(name: str, user: str = Depends(get_current_user)):
+    household = await households_col.find_one({"name": name})
+    if not household:
+        raise HTTPException(404, "Haushalt nicht gefunden")
+    if user not in household.get("members", []):
+        raise HTTPException(403, "Du bist kein Mitglied dieses Haushalts")
+    household["_id"] = str(household["_id"])
+    return household
+
 @app.get("/households/{hid}")
 async def get_household(hid: str, user: str = Depends(get_current_user)):
     try:
@@ -200,7 +231,7 @@ async def get_household(hid: str, user: str = Depends(get_current_user)):
     if not household:
         raise HTTPException(404)
     if user not in household.get("members", []):
-        raise HTTPException(403, "Du bist kein Mitglied dieses Haushalts")
+        raise HTTPException(403)
     household["_id"] = str(household["_id"])
     return household
 
@@ -267,13 +298,12 @@ async def accept_veto(hid: str, payload: dict, user: str = Depends(get_current_u
 @app.post("/households/{hid}/complete")
 async def complete_plan(hid: str, payload: dict, user: str = Depends(get_current_user)):
     plan_id = payload.get("plan_id")
-    username = payload.get("user")  # Wer die Aufgabe erledigt hat (normalerweise eingeloggter Benutzer)
+    username = payload.get("user")  # der eingeloggte Benutzer, der den Raum erledigt hat
     if not plan_id or not username:
         raise HTTPException(400, "plan_id und user erforderlich")
     household = await households_col.find_one({"_id": ObjectId(hid)})
     if not household:
         raise HTTPException(404)
-    # Prüfen, ob der Raum dem Nutzer zugewiesen ist
     assignments = household.get("current_week", {}).get("assignments", {})
     if plan_id not in assignments.get(username, []):
         raise HTTPException(400, "Raum nicht zugewiesen")
@@ -295,7 +325,7 @@ async def delete_household(hid: str, user: str = Depends(get_current_user)):
     household = await households_col.find_one({"_id": oid})
     if not household:
         raise HTTPException(404)
-    # Löschrecht: entweder created_by stimmt überein, oder (bei alten Haushalten ohne created_by) jedes Mitglied darf löschen
+    # Löschrecht: created_by muss übereinstimmen, oder (bei alten Haushalten) jedes Mitglied darf löschen
     if household.get("created_by") and household["created_by"] != user:
         raise HTTPException(403, "Nur der Ersteller des Haushalts darf ihn löschen")
     elif not household.get("created_by") and user not in household["members"]:
@@ -308,7 +338,6 @@ async def add_member(hid: str, payload: dict, user: str = Depends(get_current_us
     username = payload.get("username")
     if not username:
         raise HTTPException(400, "Username erforderlich")
-    # Existiert der Benutzer?
     if not await users_col.find_one({"username": username}):
         raise HTTPException(400, "Dieser Benutzer existiert nicht")
     household = await households_col.find_one({"_id": ObjectId(hid)})
@@ -383,6 +412,38 @@ async def join_household_by_code(code: str, user: str = Depends(get_current_user
     return household
 
 # ------------------------------
+# Nachrichten (Kudos / Erinnerungen)
+# ------------------------------
+@app.post("/households/{hid}/messages")
+async def send_message(hid: str, payload: MessageCreate, user: str = Depends(get_current_user)):
+    household = await households_col.find_one({"_id": ObjectId(hid)})
+    if not household:
+        raise HTTPException(404)
+    if user not in household["members"]:
+        raise HTTPException(403)
+    msg = {
+        "household_id": ObjectId(hid),
+        "from": user,
+        "to": payload.to,
+        "text": payload.text,
+        "timestamp": datetime.now(timezone.utc)
+    }
+    await database["messages"].insert_one(msg)
+    return {"message": "Nachricht gesendet"}
+
+@app.get("/households/{hid}/messages")
+async def get_messages(hid: str, user: str = Depends(get_current_user)):
+    household = await households_col.find_one({"_id": ObjectId(hid)})
+    if not household:
+        raise HTTPException(404)
+    if user not in household["members"]:
+        raise HTTPException(403)
+    msgs = await database["messages"].find(
+        {"household_id": ObjectId(hid), "$or": [{"to": user}, {"from": user}]}
+    ).sort("timestamp", 1).to_list(None)
+    return [{"from": m["from"], "to": m["to"], "text": m["text"]} for m in msgs]
+
+# ------------------------------
 # WebSocket für Echtzeit‑Updates
 # ------------------------------
 connected_clients = {}
@@ -430,4 +491,3 @@ async def websocket_endpoint(ws: WebSocket, household_id: str, token: str = None
         pass
     finally:
         connected_clients[household_id].remove(ws)
-
