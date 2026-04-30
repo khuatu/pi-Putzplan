@@ -16,14 +16,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.14'
-      - name: Wait for MongoDB
+      - name: Wait for MongoDB (real health check)
         run: |
           sudo apt-get update && sudo apt-get install -y netcat-openbsd
           echo "Warte auf MongoDB..."
-          for i in {1..30}; do
-            if nc -z localhost 27017; then
-              echo "MongoDB ist bereit."
-              break
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 27017; then
+              echo "Port offen, prüfe echte Verbindung..."
+              # Versuche eine echte Abfrage (admin command)
+              if mongosh --quiet --eval "db.runCommand({ ping: 1 })" mongodb://127.0.0.1:27017/admin >/dev/null 2>&1; then
+                echo "MongoDB ist bereit."
+                break
+              fi
             fi
             echo "Noch nicht bereit, warte 2s..."
             sleep 2
@@ -32,8 +36,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Run tests with retry
+      - name: Run tests
         env:
-          MONGO_URI: mongodb://localhost:27017/?serverSelectionTimeoutMS=3000
+          MONGO_URI: mongodb://127.0.0.1:27017/?serverSelectionTimeoutMS=3000
         run: |
           pytest tests/ --maxfail=5 --reruns 2 --reruns-delay 5 || pytest tests/ --last-failed --last-failed-no-failures none
