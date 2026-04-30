@@ -49,10 +49,8 @@ def test_port_8000_not_bound():
     if not is_pi():
         pytest.skip("Nur auf dem Pi relevant")
     result = subprocess.run(
-        ["sudo", "ss", "-tlnp", "sport", "= :8000"],
+        ["ss", "-tln"],
         capture_output=True, text=True
     )
-    lines = [line for line in result.stdout.splitlines() if "LISTEN" in line]
-    assert len(lines) <= 1, f"Port 8000 wird von {len(lines)} Prozessen belegt:\n{result.stdout}"
-
-# Die beiden letzten Tests bleiben unverändert (waren `.` in deiner Ausgabe).
+    lines = [line for line in result.stdout.splitlines() if ":8000" in line]
+    assert len(lines) <= 1, f"Port 8000 wird mehrfach belegt:\n{result.stdout}"
