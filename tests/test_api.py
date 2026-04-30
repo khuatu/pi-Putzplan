@@ -200,3 +200,14 @@ async def test_register_duplicate_email_fails():
         assert resp.status_code == 400
         data = resp.json()
         assert "E‑Mail‑Adresse wird bereits verwendet" in data["detail"]
+
+@pytest.mark.asyncio
+async def test_register_with_valid_de_domain():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/register", json={
+            "username": "outlookuser",
+            "password": "test123",
+            "email": "test@outlook.de"
+        })
+        assert resp.status_code == 200
