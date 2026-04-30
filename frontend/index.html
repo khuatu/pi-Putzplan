@@ -57,6 +57,7 @@
             <button onclick="assignNewWeek()" id="assignBtn" disabled>Neue Zuteilung jetzt</button>
             <button class="danger edit-only" id="deleteHouseholdBtn" onclick="deleteCurrentHousehold()">Haushalt löschen</button>
             <button id="editModeBtn" onclick="toggleEditMode()">Bearbeiten</button>
+            <button onclick="logout()">Logout</button>
         </div>
 
         <!-- Neuen Haushalt erstellen -->
@@ -82,7 +83,7 @@
         <div id="membersCard" class="card hidden">
             <h3>Mitglieder</h3>
             <div id="membersList"></div>
-            <div class="edit-only">
+            <div>
                 <input type="text" id="newMemberName" placeholder="Existierenden Benutzer hinzufügen">
                 <button onclick="addMember()">Hinzufügen</button>
                 <button id="deleteMemberBtn" class="danger hidden" onclick="deleteSelectedMember()">Ausgewähltes entfernen</button>
@@ -221,6 +222,7 @@
                 <div class="tasksContainer">
                     <div class="task"><input type="text" class="taskName" placeholder="Aufgabe"><button class="remove" onclick="this.parentElement.remove()">−</button></div>
                 </div>
+                <label><input type="checkbox" class="addWiping" checked> Boden wischen (alle 2 Wochen)</label>
                 <button class="add" onclick="addTaskToCreate(this)">＋ Aufgabe</button>
             `;
             container.appendChild(block);
@@ -250,6 +252,14 @@
                     const taskName = inp.value.trim();
                     if (taskName) tasks.push({ name: taskName });
                 });
+                // Automatisches Wischen hinzufügen
+                const addWiping = block.querySelector('.addWiping');
+                if (addWiping && addWiping.checked) {
+                    // Nur hinzufügen, falls nicht schon manuell eingetragen
+                    if (!tasks.some(t => t.name.toLowerCase().includes('wischen'))) {
+                        tasks.push({ name: 'Boden wischen', interval_weeks: 2 });
+                    }
+                }
                 if (roomName) {
                     cleaning_plans.push({ id: roomName.toLowerCase().replace(/\s/g, '_'), name: roomName, tasks, interval_weeks: interval });
                 }
@@ -605,6 +615,12 @@
                 const data = await resp.json();
                 alert(data.detail || 'Fehler');
             }
+        }
+
+        // ----Log-Out------
+        function logout() {
+            localStorage.clear();
+            location.reload();
         }
 
         // ---------- Initial ----------
