@@ -151,7 +151,13 @@ async def login(payload: dict):
     user_doc = await users_col.find_one({"username": username})
     if not user_doc or not verify_password(password, user_doc["hashed_password"]):
         raise HTTPException(401, "Anmeldedaten ungültig")
-    if not user_doc.get("email_verified"):
+    # Alte Benutzer ohne email_verified automatisch als verifiziert behandeln
+    if "email_verified" not in user_doc:
+        await users_col.update_one(
+            {"_id": user_doc["_id"]},
+            {"$set": {"email_verified": True}}
+        )
+    elif not user_doc["email_verified"]:
         raise HTTPException(403, "E‑Mail noch nicht bestätigt")
     token = create_access_token(data={"sub": username})
     return {"access_token": token, "token_type": "bearer"}
