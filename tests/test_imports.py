@@ -26,3 +26,11 @@ def test_working_directory_exists():
     # Dieser Test stellt sicher, dass das Arbeitsverzeichnis existiert
     # und die Haupt-Python-Datei vorhanden ist
     assert os.path.exists("backend/main.py")
+
+def test_event_loop_configured():
+    import os
+    config_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pytest.ini")
+    with open(config_file) as f:
+        content = f.read()
+    assert "asyncio_default_fixture_loop_scope = session" in content, \
+        "pytest.ini muss 'asyncio_default_fixture_loop_scope = session' enthalten"
